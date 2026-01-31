@@ -3,6 +3,10 @@
     <head>
         <meta charset="UTF-8">
         <title>Tube Downloader</title>
+
+        <!-- font awesome -->
+         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
         <style>
             body {
                 font-family: 'Segoe UI', Arial, sans-serif;
@@ -20,8 +24,8 @@
                 border-radius: 12px;
                 box-shadow: 0 8px 20px rgba(0,0,0,0.2);
                 text-align: center;
-                width: 400px;
-                max-width: 90%;
+                width: 50%;
+                max-width: 80%;
             }
 
             h1 {
@@ -29,19 +33,58 @@
                 color: #333;
             }
 
-            input[type=text] {
+            input[type=text], select {
                 width: 100%;
                 padding: 12px;
                 border: 2px solid #ddd;
                 border-radius: 8px;
                 font-size: 16px;
-                margin-bottom: 20px;
+                margin-bottom: 12px;
                 transition: border-color 0.3s;
             }
 
-            input[type=text]:focus {
-                border-color: #4facfe;
+            input[type=text]:focus, select:focus {
+                border-color: #fda359;
                 outline: none;
+            }
+
+            .meta {
+                display: none;
+                margin-top: 12px;
+                text-align: center;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .thumb {
+                width: 200px;
+                height: auto;
+                object-fit: cover;
+                border-radius: 6px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+                display: inline-block;
+                vertical-align: middle;
+            }
+
+            .meta-info {
+                display: inline-block;
+                vertical-align: middle;
+                max-width: 450px;
+            }
+
+            .title {
+                font-weight: 600;
+                color: #222;
+                margin-bottom: 6px;
+                font-size: 14px;
+                line-height: 1.2;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .quality-row {
+                margin-top: 10px;
             }
 
             button {
@@ -53,6 +96,7 @@
                 font-size: 16px;
                 cursor: pointer;
                 transition: background 0.3s, transform 0.2s;
+                margin-top: 12px;
             }
 
             button:hover {
@@ -64,7 +108,7 @@
             .loader {
                 display: none;
                 border: 6px solid #f3f3f3;
-                border-top: 6px solid #4facfe;
+                border-top: 6px solid #ffab65;
                 border-radius: 50%;
                 width: 40px;
                 height: 40px;
@@ -76,44 +120,172 @@
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
             }
+
+            .small-note {
+                font-size: 12px;
+                color: #666;
+                margin-top: 8px;
+            }
         </style>
     </head>
 
     <body>
         <div class="container">
-            <h1>Tube Downloader</h1>
+            <h1><i class="fa-solid fa-cloud-arrow-down" style="color: #ff9238;"></i> Tube Downloader</h1>
             <form id="downloadForm">
-                <input type="text" name="url" placeholder="Paste YouTube link here" required>
-                <button type="submit">Download</button>
+                <input id="urlInput" type="text" name="url" placeholder="Paste YouTube link here" required autocomplete="off">
+                <div class="meta" id="metaSection">
+                    <img id="thumbImg" class="thumb" src="" alt="thumbnail">
+                    <div class="meta-info">
+                        <div class="title" id="videoTitle"></div>
+                        <div class="quality-row">
+                            <select id="qualitySelect" name="quality" required>
+                                <!-- options populated dynamically -->
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button id="downloadBtn" type="submit"><i class="fa-solid fa-download  fa-beat"></i> Download</button>
             </form>
             <div class="loader" id="loader"></div>
+            <div class="small-note" id="note"></div>
         </div>
 
         <!-- jQuery CDN -->
         <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
         <script>
             $(function(){
-                $("#downloadForm").on("submit", function(e){
+                const $form = $("#downloadForm");
+                const $url = $("#urlInput");
+                const $meta = $("#metaSection");
+                const $thumb = $("#thumbImg");
+                const $title = $("#videoTitle");
+                const $quality = $("#qualitySelect");
+                const $loader = $("#loader");
+                const $note = $("#note");
+
+                let lastProbeUrl = "";
+                let probeTimer = null;
+                const DEBOUNCE_MS = 700;
+
+                function showLoader() { $loader.show(); }
+                function hideLoader() { $loader.hide(); }
+
+                // Basic YouTube URL check to avoid unnecessary probes
+                function looksLikeYouTube(u) {
+                    if (!u) return false;
+                    try {
+                        const parsed = new URL(u);
+                        const host = parsed.hostname.toLowerCase();
+                        return host.includes("youtube.com") || host.includes("youtu.be");
+                    } catch (e) {
+                        // if not a full URL, still allow probing for common patterns
+                        return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/.test(u);
+                    }
+                }
+
+                function scheduleProbe() {
+                    clearTimeout(probeTimer);
+                    probeTimer = setTimeout(probeUrl, DEBOUNCE_MS);
+                }
+
+                // Trigger probe on paste, input, or when user stops typing
+                $url.on("paste", function(){
+                    // small delay to let pasted value populate
+                    setTimeout(scheduleProbe, 50);
+                });
+
+                $url.on("input", function(){
+                    // auto-probe only if it looks like a YouTube link
+                    const val = $url.val().trim();
+                    if (val && looksLikeYouTube(val)) {
+                        scheduleProbe();
+                    } else {
+                        // hide meta if input cleared or not a youtube link
+                        $meta.hide();
+                        $quality.empty();
+                        $note.text("");
+                    }
+                });
+
+                // also probe on blur and Enter as fallback
+                $url.on("blur", probeUrl);
+                $url.on("keydown", function(e){
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        probeUrl();
+                    }
+                });
+
+                function probeUrl() {
+                    const val = $url.val().trim();
+                    if (!val || val === lastProbeUrl) return;
+                    if (!looksLikeYouTube(val)) {
+                        $note.text("Please paste a valid YouTube link.");
+                        return;
+                    }
+                    lastProbeUrl = val;
+                    $meta.hide();
+                    $quality.empty();
+                    $note.text("");
+                    showLoader();
+
+                    $.ajax({
+                        url: "/probe",
+                        type: "POST",
+                        data: { url: val },
+                        dataType: "json",
+                        success: function(resp) {
+                            hideLoader();
+                            if (resp && resp.success) {
+                                // populate thumbnail and title
+                                $thumb.attr("src", resp.thumbnail || "");
+                                $title.text(resp.title || "Untitled");
+                                // populate quality options
+                                $quality.empty();
+                                $quality.append($('<option>').val("best").text("--select quality--"));
+                                if (Array.isArray(resp.qualities) && resp.qualities.length) {
+                                    resp.qualities.forEach(function(q){
+                                        $quality.append($('<option>').val(q.value).text(q.label));
+                                    });
+                                }
+                                $meta.show();
+                                $note.text("");
+                            } else {
+                                $note.text(resp && resp.error ? resp.error : "Could not fetch video info.");
+                            }
+                        },
+                        error: function() {
+                            hideLoader();
+                            $note.text("Failed to fetch video info. Check the link or try again.");
+                        }
+                    });
+                }
+
+                $form.on("submit", function(e){
                     e.preventDefault();
-                    $("#loader").show();
+                    // ensure meta is shown and quality selected
+                    if (!$meta.is(":visible")) {
+                        // try probing first
+                        probeUrl();
+                        $note.text("Fetching video info first. Please click Download again.");
+                        return;
+                    }
+
+                    showLoader();
 
                     $.ajax({
                         url: "/download",
                         type: "POST",
-                        data: $(this).serialize(),
-                        xhrFields: {
-                            responseType: 'blob' // expect binary file
-                        },
+                        data: $form.serialize(),
+                        xhrFields: { responseType: 'blob' },
                         success: function(data, status, xhr){
-                            $("#loader").hide();
-
-                            // trigger browser download with correct filename
+                            hideLoader();
                             const blob = new Blob([data], {type: "video/mp4"});
                             const link = document.createElement("a");
                             const url = window.URL.createObjectURL(blob);
                             link.href = url;
 
-                            // get filename from header if available
                             const disposition = xhr.getResponseHeader("Content-Disposition");
                             let filename = "video.mp4";
                             if (disposition && disposition.indexOf("filename=") !== -1) {
@@ -127,7 +299,7 @@
                             window.URL.revokeObjectURL(url);
                         },
                         error: function(){
-                            $("#loader").hide();
+                            hideLoader();
                             alert("Download failed!");
                         }
                     });
