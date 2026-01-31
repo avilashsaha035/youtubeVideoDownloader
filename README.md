@@ -9,6 +9,6 @@ It provides a clean web interface where users can paste a YouTube link, preview 
 - Paste a YouTube link and instantly see the **thumbnail** and **title**.
 - Choose from multiple **video qualities** before downloading.
 - Downloads are named with the **actual video title**.
-- Lightweight server — no heavy frameworks required.
+- Lightweight server — no heavy frameworks used.
 - Clean and responsive frontend with a loader spinner while fetching video info.
 
