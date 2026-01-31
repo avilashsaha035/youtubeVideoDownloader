@@ -1,12 +1,11 @@
 import http.server
 import socketserver
 import urllib.parse
-import os
 import yt_dlp
+import os
+import tempfile
 
 PORT = 8000
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -22,28 +21,39 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             url = params.get("url", [""])[0]
 
             if url:
-                ydl_opts = {
-                    "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
-                    "format": "bestvideo+bestaudio/best"
-                }
                 try:
+                    # Create a temporary file path
+                    tmpdir = tempfile.gettempdir()
+                    outtmpl = os.path.join(tmpdir, "%(title)s.%(ext)s")
+
+                    ydl_opts = {
+                        "format": "bestvideo+bestaudio/best",
+                        "merge_output_format": "mp4",
+                        "outtmpl": outtmpl,
+                    }
+
+                    # Download to temp file
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=True)
                         filename = ydl.prepare_filename(info)
 
-                    # Use only the basename for the link and forward slashes
-                    basename = os.path.basename(filename)
-                    download_link = f"/{DOWNLOAD_DIR}/{basename}"
+                    filesize = os.path.getsize(filename)
 
+                    # Send headers with Content-Length
                     self.send_response(200)
-                    self.send_header("Content-type", "text/html")
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Disposition", "attachment; filename=\"video.mp4\"")
+                    self.send_header("Content-Length", str(filesize))
                     self.end_headers()
-                    self.wfile.write(f"""
-                        <html><body>
-                        <h2>Download complete!</h2>
-                        <a href="{download_link}" download>Click here to save</a>
-                        </body></html>
-                    """.encode("utf-8"))
+
+                    # Stream file to browser
+                    with open(filename, "rb") as f:
+                        for chunk in iter(lambda: f.read(8192), b""):
+                            self.wfile.write(chunk)
+
+                    # Remove temp file after streaming
+                    os.remove(filename)
+
                 except Exception as e:
                     self.send_response(500)
                     self.send_header("Content-type", "text/plain")
@@ -53,9 +63,6 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(b"Invalid URL")
-
-# Serve files from the project root (so /downloads is accessible)
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 Handler = MyHandler
 with socketserver.TCPServer(("", PORT), Handler) as httpd:
