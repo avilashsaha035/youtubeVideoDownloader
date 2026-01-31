@@ -39,10 +39,14 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
                     filesize = os.path.getsize(filename)
 
+                    # Get actual title of the yt video
+                    video_title = info.get("title", "video")
+                    basename = f"{video_title}.mp4"
+
                     # Send headers with Content-Length
                     self.send_response(200)
                     self.send_header("Content-Type", "application/octet-stream")
-                    self.send_header("Content-Disposition", "attachment; filename=\"video.mp4\"")
+                    self.send_header("Content-Disposition", f"attachment; filename=\"{basename}\"")
                     self.send_header("Content-Length", str(filesize))
                     self.end_headers()
 
